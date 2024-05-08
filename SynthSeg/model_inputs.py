@@ -21,6 +21,59 @@ import numpy.random as npr
 # third-party imports
 from ext.lab2im import utils
 
+def generate_random_cluster_labels(labelmap_npy: np.array,
+                                   fg_npy : np.array, 
+                                   bg_npy : np.array, 
+                                   unique_labels=None):
+    """Method randomizing the clusters picked for each labelID.
+
+    Args:
+        fg_npy (np.array): foreground clusters npy containing a 300,300,250 dense labelmap for FG=1,...,N_FG
+        bg_npy (np.array): background clusters npy containing a 300,300,250 dense labelmap for BG=1,...,N_BG
+        orig_labelmap_path (str): Path to original .nii.gz labelmap
+        unique_labels (_type_, optional): unique labels/segment, in the same format as the segmentation labels. Defaults to None.
+        verbose (boolean): print temp arrays
+        Returns combined BG_RANDOM.NPY + FG_RANDOM.NPY
+    """
+    # orig_labelmap_image, aff, h = utils.load_volume(orig_labelmap_path, im_only=False)
+    orig_labelmap_image = labelmap_npy
+    #calculate unique labels in labelmaps
+    if unique_labels is None:
+        unique_labels_image = np.unique(labelmap_npy.astype(np.int16))[1:]#remove nackground label
+    else:
+        unique_labels_image = unique_labels
+    #generate random cluster assignments for the clusters
+    cluster_labelID_arr = np.random.choice(3, 
+                                        unique_labels_image.size).astype(np.int16)#, 
+                                        #p=[0.2, 0.4, 0.4])
+    #initialize foreground output_array
+    out_arr_fg = np.zeros_like(labelmap_npy).astype(np.int16)
+    #iterate over unique clusters IDs
+    for x in np.sort(np.unique(cluster_labelID_arr)):
+        #get 3d labelmapp corresponding to current clusterID processed 
+        temp_fg_cluster = fg_npy[x]
+        #create label +101,+102,+103 for labels that  were assigned to current cluster ID
+        filtered_labelIDs = unique_labels_image[np.argwhere(cluster_labelID_arr == x)].flatten()
+        labels_clusters_gen = np.add(np.repeat(filtered_labelIDs * 100, 3), 
+            np.stack((np.array([1,2,3]),) * filtered_labelIDs.size, axis=0).flatten())
+        #flatten augmented labels array 
+        #flatten cluster array 
+        flat_temp_fg_cluster = temp_fg_cluster.flatten()
+        #select the indexes of labels that are asssigned to this cluster id
+        select_labels_idx = np.isin(flat_temp_fg_cluster, labels_clusters_gen)
+        #select label values for above indexes
+        select_array_cluster = np.where(select_labels_idx, flat_temp_fg_cluster, 0)
+        # select_array_cluster = select_labels_idx * flat_temp_fg_cluster 
+        #reshape output array in 3D and add it to the previous cluster=
+        out_arr_fg_temp = np.reshape(select_array_cluster, labelmap_npy.shape)
+        out_arr_fg += out_arr_fg_temp.astype(np.int16)
+    #do the same for background clusters 
+    choice_bg_clusters = np.random.choice(5,1)#, 
+                                       #p=[0.1, 0.15, 0.20, 0.25, 0.3])
+    out_arr_bg = bg_npy[choice_bg_clusters[0]].astype(np.int16)
+    out_npy = np.add(out_arr_bg,out_arr_fg).astype(np.int16) 
+    return out_npy
+
 
 def build_model_inputs(path_label_maps,
                        n_labels,
@@ -97,9 +150,16 @@ def build_model_inputs(path_label_maps,
 
             # load input label map
             lab = utils.load_volume(path_label_maps[idx], dtype='int', aff_ref=np.eye(4))
+            fg_npy  = np.load('/home/exouser/Documents/synth_abdomen/TEMP_RANDOM_TR/code/random_selection_training_exp/mock_data/config_npy/s0011_foreground.npy', 
+                mmap_mode='r')
+            bg_npy = np.load('/home/exouser/Documents/synth_abdomen/TEMP_RANDOM_TR/code/random_selection_training_exp/mock_data/config_npy/s0011_background.npy', 
+                mmap_mode='r')
+            lab = generate_random_cluster_labels(labelmap_npy=lab,
+                                     fg_npy=fg_npy,
+                                     bg_npy=bg_npy,
+                                     unique_labels=None)
             if (npr.uniform() > 0.7) & ('seg_cerebral' in path_label_maps[idx]):
-                lab[lab == 24] = 0
-
+                lab[lab == 24] = 0 
             # add label map to inputs
             list_label_maps.append(utils.add_axis(lab, axis=[0, -1]))
 
